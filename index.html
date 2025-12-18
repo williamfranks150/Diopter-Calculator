@@ -1,4 +1,4 @@
-<!-- index.html -->
+<!-- index.html (updated) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -54,30 +54,19 @@
   <h1>Diopter Range Calculator</h1>
 
   <div class="card grid">
-    <div class="cols2">
-      <div class="row">
-        <label>Lens (label only)</label>
-        <input id="lens" placeholder="Tamashii 50mm" autocomplete="off" />
-      </div>
-      <div class="row">
-        <label>Format (label only)</label>
-        <select id="format">
-          <option value="A35">Alexa 35 / S35</option>
-          <option value="FF">Full Frame</option>
-          <option value="S16">S16</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
+    <div class="row">
+      <label>Lens (label only)</label>
+      <input id="lens" placeholder="Tamashii 50mm" autocomplete="off" />
     </div>
 
     <div class="cols2">
       <div class="row">
         <label>Lens minimum focus (S) (feet/inches)</label>
-        <input id="S" placeholder="Example: 2'6&quot;   or   30in   or   2.5ft" inputmode="decimal" autocomplete="off" />
+        <input id="S" placeholder="Example: 2'6&quot;   or   30in   or   2.5ft" autocomplete="off" />
       </div>
       <div class="row">
         <label>New close limit with diopter (X) (feet/inches)</label>
-        <input id="X" placeholder="Leave blank to solve" inputmode="decimal" autocomplete="off" />
+        <input id="X" placeholder="Leave blank to solve" autocomplete="off" />
       </div>
     </div>
 
@@ -94,7 +83,7 @@
       </div>
       <div class="row">
         <label>Sensor → diopter plane (L) (feet/inches)</label>
-        <input id="L" placeholder="Example: 1'8&quot;   (leave blank to solve)" inputmode="decimal" autocomplete="off" />
+        <input id="L" placeholder="Example: 1'8&quot;   (leave blank to solve)" autocomplete="off" />
       </div>
     </div>
 
@@ -133,30 +122,23 @@
 
   const $ = (id) => document.getElementById(id);
 
-  // --- feet/inches parsing to meters ---
-  // Accepts: 2'6", 2' 6", 2.5ft, 30in, 30", 0.8m, 1'8-1/2"
   function parseDistanceToMeters(raw){
     if (!raw) return null;
     let s = raw.trim().toLowerCase();
     if (!s) return null;
 
-    // normalize
     s = s.replace(/\s+/g,'');
     s = s.replace(/feet/g,'ft').replace(/foot/g,'ft').replace(/inches/g,'in').replace(/inch/g,'in');
 
-    // meters explicit
     const mMatch = s.match(/^([0-9]*\.?[0-9]+)m$/);
     if (mMatch) return Number(mMatch[1]);
 
-    // inches only: 30in or 30"
     const inMatch = s.match(/^([0-9]*\.?[0-9]+)(in|")$/);
     if (inMatch) return Number(inMatch[1]) * 0.0254;
 
-    // feet only: 2.5ft or 2.5'
     const ftOnly = s.match(/^([0-9]*\.?[0-9]+)(ft|')$/);
     if (ftOnly) return Number(ftOnly[1]) * 0.3048;
 
-    // feet + inches with optional fraction: 2'6", 2'6-1/2", 2'6.5"
     const ftIn = s.match(/^([0-9]*\.?[0-9]+)'([0-9]*\.?[0-9]+)?(?:-([0-9]+)\/([0-9]+))?(?:"|in)?$/);
     if (ftIn){
       const ft = Number(ftIn[1]);
@@ -167,14 +149,12 @@
       return ft * 0.3048 + inch * 0.0254;
     }
 
-    // bare number fallback (assume feet)
     const num = s.match(/^([0-9]*\.?[0-9]+)$/);
     if (num) return Number(num[1]) * 0.3048;
 
     return null;
   }
 
-  // meters -> formatted feet/inches (nearest 1/8")
   function metersToFtIn(m){
     if (m == null || !isFinite(m) || m <= 0) return '—';
     const totalIn = m / 0.0254;
@@ -210,21 +190,17 @@
 
   function isPos(x){ return x != null && isFinite(x) && x > 0; }
 
-  // Snap diopter to nearest standard
   const STANDARD = [0.5, 1, 2, 3];
   function nearestStandardD(D){
     let best = STANDARD[0], bestErr = Math.abs(D - best);
     for (const d of STANDARD){
       const e = Math.abs(D - d);
       if (e < bestErr - 1e-12) { best = d; bestErr = e; }
-      // tie-break: pick stronger (higher) diopter
       if (Math.abs(e - bestErr) <= 1e-12 && d > best) best = d;
     }
     return best;
   }
 
-  // --- Solvers ---
-  // D = 1/(X-L) + 1/(S-L)
   function solveD(S, X, L){
     const a = S - L;
     const b = X - L;
@@ -232,7 +208,6 @@
     return (1/a) + (1/b);
   }
 
-  // X = L + 1 / ( D - 1/(S-L) )
   function solveX(S, D, L){
     const a = S - L;
     if (!(a > 0 && D > 0)) return null;
@@ -241,7 +216,6 @@
     return L + (1/denom);
   }
 
-  // S = L + 1 / ( D - 1/(X-L) )
   function solveS(X, D, L){
     const b = X - L;
     if (!(b > 0 && D > 0)) return null;
@@ -250,9 +224,6 @@
     return L + (1/denom);
   }
 
-  // Solve L from S, X, D:
-  // Let Δ = X - S, solve quadratic for a = S - L:
-  // D a^2 + (DΔ - 2)a - Δ = 0
   function solveL(S, X, D){
     if (!(D > 0)) return null;
     const delta = X - S;
@@ -267,12 +238,9 @@
     const a1 = (-B + sqrt) / (2*A);
     const a2 = (-B - sqrt) / (2*A);
 
-    // need a = S - L > 0 and also X - L > 0 => (X - (S - a)) = delta + a > 0
     const candidates = [a1, a2].filter(a => a > 0 && (delta + a) > 0 && isFinite(a));
     if (!candidates.length) return null;
 
-    // choose the one that yields a physically sensible L (not negative huge): prefer smaller L (larger a)?? no:
-    // pick the candidate that gives L within [0, S) if possible.
     let best = candidates[0];
     for (const a of candidates){
       const L = S - a;
@@ -281,9 +249,7 @@
       const okBest = (Lbest >= 0 && Lbest < S);
       if (ok && !okBest) best = a;
       if (ok === okBest){
-        // prefer L >= 0 (closer to real rigs)
         if (L >= 0 && Lbest < 0) best = a;
-        // then prefer smaller L magnitude
         if (Math.abs(L) < Math.abs(Lbest)) best = a;
       }
     }
@@ -301,7 +267,6 @@
     const haveL = isPos(L_in);
     const haveD = D_in != null && isFinite(D_in) && D_in > 0;
 
-    // decide which single field is missing
     const missing = [];
     if (!haveS) missing.push('S');
     if (!haveX) missing.push('X');
@@ -321,44 +286,45 @@
       const m = missing[0];
 
       if (m === 'D'){
-        D = solveD(S, X, L);
-        if (D != null && isFinite(D) && D > 0){
+        const Dexact = solveD(S, X, L);
+        if (Dexact != null && isFinite(Dexact) && Dexact > 0){
           solvedLabel = `Solved D from S, X, L`;
-          exactDText = `+${D.toFixed(3)}`;
-          const nd = nearestStandardD(D);
+          exactDText = `+${Dexact.toFixed(3)}`;
+          const nd = nearestStandardD(Dexact);
           nearestDText = `+${nd}`;
-          // auto-set dropdown to nearest for usability, but keep exact displayed
           $('D').value = String(nd);
           D = nd;
         }
       }
 
       if (m === 'X'){
-        X = solveX(S, D, L);
-        if (X != null){
+        const Xsol = solveX(S, D, L);
+        if (Xsol != null){
           solvedLabel = `Solved X from S, D, L`;
-          $('X').value = metersToFtIn(X);
+          $('X').value = metersToFtIn(Xsol);
+          X = Xsol;
         }
       }
 
       if (m === 'S'){
-        S = solveS(X, D, L);
-        if (S != null){
+        const Ssol = solveS(X, D, L);
+        if (Ssol != null){
           solvedLabel = `Solved S from X, D, L`;
-          $('S').value = metersToFtIn(S);
+          $('S').value = metersToFtIn(Ssol);
+          S = Ssol;
         }
       }
 
       if (m === 'L'){
-        L = solveL(S, X, D);
-        if (L != null){
+        const Lsol = solveL(S, X, D);
+        if (Lsol != null){
           solvedLabel = `Solved L from S, X, D`;
-          $('L').value = metersToFtIn(L);
+          $('L').value = metersToFtIn(Lsol);
+          L = Lsol;
         }
       }
     }
 
-    // outputs (far limit needs D and L)
     if (D != null && L != null && D > 0 && L > 0){
       const far = L + (1 / D);
       $('farOut').textContent = metersToFtIn(far);
@@ -371,8 +337,7 @@
     $('nearestDOut').textContent = nearestDText;
   }
 
-  // compute on edits
-  ['S','X','L','D','lens','format'].forEach(id => {
+  ['S','X','L','D','lens'].forEach(id => {
     $(id).addEventListener('input', compute);
     $(id).addEventListener('change', compute);
   });
