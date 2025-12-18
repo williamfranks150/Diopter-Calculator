@@ -1,5 +1,5 @@
 // sw.js
-const CACHE = 'diopter-range-v1'; // bump this every deploy (v2, v3, v4...)
+const CACHE = 'diopter-range-v10'; // bump this every deploy
 const ASSETS = [
   './',
   './index.html',
@@ -18,22 +18,34 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(
-      keys.map((k) => (k !== CACHE ? caches.delete(k) : null))
-    );
+    await Promise.all(keys.map((k) => (k !== CACHE ? caches.delete(k) : null)));
     await self.clients.claim();
   })());
 });
 
+// Cache-first for app shell; network-first for everything else.
 self.addEventListener('fetch', (event) => {
-  event.respondWith((async () => {
-    const cached = await caches.match(event.request);
-    if (cached) return cached;
+  const req = event.request;
 
+  // App shell
+  if (req.mode === 'navigate' || ASSETS.some(a => req.url.endsWith(a.replace('./','')))) {
+    event.respondWith((async () => {
+      const cached = await caches.match(req);
+      if (cached) return cached;
+      const fresh = await fetch(req);
+      return fresh;
+    })());
+    return;
+  }
+
+  // Network-first (lets your online lens DB update when online)
+  event.respondWith((async () => {
     try {
-      const fresh = await fetch(event.request);
+      const fresh = await fetch(req);
       return fresh;
     } catch {
+      const cached = await caches.match(req);
+      if (cached) return cached;
       return caches.match('./index.html');
     }
   })());
