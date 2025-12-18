@@ -1,0 +1,231 @@
+<!-- index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Diopter Range Calculator</title>
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Diopter">
+<meta name="theme-color" content="#000000">
+
+<link rel="manifest" href="./manifest.json">
+
+<style>
+  :root{
+    --bg:#000; --fg:#fff;
+    --line:rgba(255,255,255,.18);
+    --field:rgba(255,255,255,.08);
+    --muted:rgba(255,255,255,.72);
+    --warn:#ffd24a;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 -apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:720px; margin:0 auto; padding:16px 14px 28px; padding-top:calc(16px + env(safe-area-inset-top))}
+  h1{font-size:18px; margin:0 0 12px}
+  .card{border:1px solid var(--line); border-radius:14px; padding:14px; background:rgba(255,255,255,.03)}
+  .grid{display:grid; gap:10px}
+  .row{display:grid; grid-template-columns:1fr; gap:6px}
+  label{font-size:12px; color:var(--muted); letter-spacing:.2px}
+  input,select{
+    width:100%; border:1px solid var(--line); background:var(--field); color:var(--fg);
+    border-radius:12px; padding:12px 12px; font-size:16px; outline:none;
+  }
+  input::placeholder{color:rgba(255,255,255,.35)}
+  .cols2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .out{margin-top:12px; display:grid; gap:10px}
+  .pill{
+    border:1px solid var(--line); border-radius:14px; padding:12px; background:rgba(255,255,255,.03);
+    display:flex; justify-content:space-between; gap:10px; align-items:baseline
+  }
+  .pill .k{color:var(--muted); font-size:12px}
+  .pill .v{font-size:18px; font-variant-numeric:tabular-nums}
+  .note{color:var(--muted); font-size:12px; margin-top:10px}
+  .warn{color:var(--warn)}
+  .mono{font-variant-numeric:tabular-nums}
+</style>
+</head>
+
+<body>
+<div class="wrap">
+  <h1>Diopter Range Calculator</h1>
+
+  <div class="card grid">
+    <div class="cols2">
+      <div class="row">
+        <label>Lens (label only)</label>
+        <input id="lens" placeholder="Tamashii 50mm" autocomplete="off" />
+      </div>
+      <div class="row">
+        <label>Format (label only)</label>
+        <select id="format">
+          <option value="A35">Alexa 35 / S35</option>
+          <option value="FF">Full Frame</option>
+          <option value="S16">S16</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="cols2">
+      <div class="row">
+        <label>Diopter strength</label>
+        <select id="diopter">
+          <option value="0.5">+0.5</option>
+          <option value="1" selected>+1</option>
+          <option value="2">+2</option>
+          <option value="3">+3</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Lens minimum focus (feet/inches)</label>
+        <input id="minFocus" placeholder="Example: 2'6&quot;   or   30in   or   2.5ft" inputmode="decimal" autocomplete="off" />
+      </div>
+    </div>
+
+    <div class="row">
+      <label>Optional: a focus mark to convert (feet/inches)</label>
+      <input id="mark" placeholder="Example: 6'   or   10ft   or   120in" inputmode="decimal" autocomplete="off" />
+    </div>
+
+    <div class="out">
+      <div class="pill">
+        <div class="k">New close limit</div>
+        <div class="v mono" id="newMin">—</div>
+      </div>
+      <div class="pill">
+        <div class="k">New far limit (was ∞)</div>
+        <div class="v mono" id="newMax">—</div>
+      </div>
+      <div class="pill">
+        <div class="k">Focus mark maps to</div>
+        <div class="v mono" id="markOut">—</div>
+      </div>
+    </div>
+
+    <div class="note">
+      Uses: <span class="mono">1/s_new = 1/s + D</span> (thin-lens approximation).<br>
+      <span class="warn">Reminder:</span> with positive diopters you lose infinity; far limit becomes <span class="mono">1/D</span>.
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // --- PWA SW registration ---
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+  }
+
+  const $ = (id) => document.getElementById(id);
+
+  // Parse feet/inches user input into meters.
+  // Accepts: 2'6", 2' 6", 2.5ft, 30in, 30", 0.8m
+  function parseDistanceToMeters(raw){
+    if (!raw) return null;
+    const s = raw.trim().toLowerCase().replace(/\s+/g,'');
+    if (!s) return null;
+
+    // meters explicit
+    const mMatch = s.match(/^([0-9]*\.?[0-9]+)m$/);
+    if (mMatch) return Number(mMatch[1]);
+
+    // inches only: 30in or 30"
+    const inMatch = s.match(/^([0-9]*\.?[0-9]+)(in|")$/);
+    if (inMatch) return Number(inMatch[1]) * 0.0254;
+
+    // feet only: 2.5ft or 2.5'
+    const ftOnly = s.match(/^([0-9]*\.?[0-9]+)(ft|')$/);
+    if (ftOnly) return Number(ftOnly[1]) * 0.3048;
+
+    // feet + inches: 2'6", 2'6in, 2'06"
+    const ftIn = s.match(/^([0-9]*\.?[0-9]+)'([0-9]*\.?[0-9]+)?("?|in)?$/);
+    if (ftIn){
+      const ft = Number(ftIn[1]);
+      const inch = ftIn[2] ? Number(ftIn[2]) : 0;
+      return ft * 0.3048 + inch * 0.0254;
+    }
+
+    // bare number fallback (assume feet)
+    const num = s.match(/^([0-9]*\.?[0-9]+)$/);
+    if (num) return Number(num[1]) * 0.3048;
+
+    return null;
+  }
+
+  // meters -> formatted feet/inches (nearest 1/8")
+  function metersToFtIn(m){
+    if (m == null || !isFinite(m) || m <= 0) return '—';
+    const totalIn = m / 0.0254;
+    const ft = Math.floor(totalIn / 12);
+    let inch = totalIn - ft * 12;
+
+    // round to nearest 1/8"
+    const eighths = Math.round(inch * 8);
+    inch = eighths / 8;
+
+    // carry
+    let ft2 = ft, inch2 = inch;
+    if (inch2 >= 12){
+      ft2 += 1;
+      inch2 -= 12;
+    }
+
+    // display: 3'3 1/2"
+    const whole = Math.floor(inch2);
+    const frac = inch2 - whole;
+    const fracStr = (()=>{
+      const n = Math.round(frac * 8);
+      if (n === 0) return '';
+      if (n === 4) return ' 1/2';
+      if (n === 2) return ' 1/4';
+      if (n === 6) return ' 3/4';
+      if (n === 1) return ' 1/8';
+      if (n === 3) return ' 3/8';
+      if (n === 5) return ' 5/8';
+      if (n === 7) return ' 7/8';
+      return '';
+    })();
+
+    return `${ft2}'${whole}${fracStr}"`;
+  }
+
+  // core mapping: s_new = 1 / (1/s + D)
+  function applyDiopter(sMeters, D){
+    if (sMeters == null || !isFinite(sMeters) || sMeters <= 0) return null;
+    const inv = (1 / sMeters) + D;
+    if (inv <= 0) return null;
+    return 1 / inv;
+  }
+
+  function compute(){
+    const D = Number($('diopter').value); // m^-1
+    const minM = parseDistanceToMeters($('minFocus').value);
+    const markM = parseDistanceToMeters($('mark').value);
+
+    // far limit: 1/D meters
+    const maxM = (D > 0) ? (1 / D) : null;
+
+    // close limit: map lens min focus through diopter
+    const newMinM = (minM != null) ? applyDiopter(minM, D) : null;
+
+    // focus mark mapping
+    const markOutM = (markM != null) ? applyDiopter(markM, D) : null;
+
+    $('newMax').textContent = (maxM != null) ? metersToFtIn(maxM) : '—';
+    $('newMin').textContent = (newMinM != null) ? metersToFtIn(newMinM) : '—';
+    $('markOut').textContent = (markOutM != null) ? metersToFtIn(markOutM) : '—';
+  }
+
+  ['diopter','minFocus','mark','lens','format'].forEach(id => {
+    $(id).addEventListener('input', compute);
+    $(id).addEventListener('change', compute);
+  });
+
+  compute();
+})();
+</script>
+</body>
+</html>
