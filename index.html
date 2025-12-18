@@ -1,4 +1,4 @@
-<!-- index.html (updated) -->
+<!-- index.html -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -20,10 +20,11 @@
     --field:rgba(255,255,255,.08);
     --muted:rgba(255,255,255,.72);
     --warn:#ffd24a;
+    --ok:#7CFF7C;
   }
   *{box-sizing:border-box}
   html,body{height:100%; margin:0; background:var(--bg); color:var(--fg); font:16px/1.35 -apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial}
-  .wrap{max-width:720px; margin:0 auto; padding:16px 14px 28px; padding-top:calc(16px + env(safe-area-inset-top))}
+  .wrap{max-width:760px; margin:0 auto; padding:16px 14px 28px; padding-top:calc(16px + env(safe-area-inset-top))}
   h1{font-size:18px; margin:0 0 12px}
   .card{border:1px solid var(--line); border-radius:14px; padding:14px; background:rgba(255,255,255,.03)}
   .grid{display:grid; gap:10px}
@@ -46,6 +47,10 @@
   .warn{color:var(--warn)}
   .mono{font-variant-numeric:tabular-nums}
   .small{font-size:13px}
+  .inline{display:flex; align-items:center; gap:10px}
+  .tag{font-size:12px; padding:4px 8px; border:1px solid var(--line); border-radius:999px; color:var(--muted)}
+  .tag.ok{color:var(--ok); border-color:rgba(124,255,124,.35)}
+  .tag.bad{color:var(--warn); border-color:rgba(255,210,74,.35)}
 </style>
 </head>
 
@@ -54,15 +59,43 @@
   <h1>Diopter Range Calculator</h1>
 
   <div class="card grid">
+
     <div class="row">
-      <label>Lens (label only)</label>
-      <input id="lens" placeholder="Tamashii 50mm" autocomplete="off" />
+      <div class="inline">
+        <label style="margin:0">Lens lookup (online, cached)</label>
+        <span class="tag" id="dbStatus">DB: —</span>
+      </div>
+    </div>
+
+    <div class="cols2">
+      <div class="row">
+        <label>Lens brand</label>
+        <select id="brand"><option value="">Loading…</option></select>
+      </div>
+      <div class="row">
+        <label>Focal length (mm)</label>
+        <input id="focal" placeholder="50" autocomplete="off" />
+      </div>
+    </div>
+
+    <div class="cols2">
+      <div class="row">
+        <label>Sensor → diopter distance (L) (feet/inches)</label>
+        <input id="L" placeholder="Auto from lookup (leave blank to solve)" autocomplete="off" />
+      </div>
+      <div class="row">
+        <label>
+          <input type="checkbox" id="manualL" />
+          Manual override L
+        </label>
+        <input id="sensorMm" placeholder="Sensor→front element (mm) (auto)" autocomplete="off" />
+      </div>
     </div>
 
     <div class="cols2">
       <div class="row">
         <label>Lens minimum focus (S) (feet/inches)</label>
-        <input id="S" placeholder="Example: 2'6&quot;   or   30in   or   2.5ft" autocomplete="off" />
+        <input id="S" placeholder="2'6&quot;  |  30in  |  2.5ft" autocomplete="off" />
       </div>
       <div class="row">
         <label>New close limit with diopter (X) (feet/inches)</label>
@@ -70,21 +103,15 @@
       </div>
     </div>
 
-    <div class="cols2">
-      <div class="row">
-        <label>Diopter (D)</label>
-        <select id="D">
-          <option value="">— (solve)</option>
-          <option value="0.5">+0.5</option>
-          <option value="1">+1</option>
-          <option value="2">+2</option>
-          <option value="3">+3</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>Sensor → diopter plane (L) (feet/inches)</label>
-        <input id="L" placeholder="Example: 1'8&quot;   (leave blank to solve)" autocomplete="off" />
-      </div>
+    <div class="row">
+      <label>Diopter (D)</label>
+      <select id="D">
+        <option value="">— (solve)</option>
+        <option value="0.5">+0.5</option>
+        <option value="1">+1</option>
+        <option value="2">+2</option>
+        <option value="3">+3</option>
+      </select>
     </div>
 
     <div class="out">
@@ -107,7 +134,7 @@
     </div>
 
     <div class="note">
-      Assumes diopter plane is near the front element.<br>
+      Assumes diopter plane is as close to the front element as possible.<br>
       Uses: <span class="mono">D = 1/(X−L) + 1/(S−L)</span> and <span class="mono">Far = L + 1/D</span>.
       <span class="warn">Positive diopters remove infinity.</span>
     </div>
@@ -116,12 +143,29 @@
 
 <script>
 (() => {
+  // ---------- CONFIG ----------
+  // Host a JSON at this URL. Schema below.
+  const LENS_DB_URL = 'https://YOUR-DOMAIN-OR-GITHUB-PAGES/lens-db.json';
+  const LS_KEY = 'lensDB_v1';
+
+  // Expected JSON schema (sensor-to-front-element distance in mm):
+  // {
+  //   "brands": [
+  //     {
+  //       "name": "Tamashii",
+  //       "lenses": { "18": 140, "21": 140, "25": 140, "32": 140, "40": 140, "50": 140 }
+  //     }
+  //   ]
+  // }
+
+  // ---------- PWA SW ----------
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
   }
 
   const $ = (id) => document.getElementById(id);
 
+  // ---------- Units ----------
   function parseDistanceToMeters(raw){
     if (!raw) return null;
     let s = raw.trim().toLowerCase();
@@ -164,10 +208,7 @@
     const eighths = Math.round(inch * 8);
     inch = eighths / 8;
 
-    if (inch >= 12){
-      ft += 1;
-      inch -= 12;
-    }
+    if (inch >= 12){ ft += 1; inch -= 12; }
 
     const whole = Math.floor(inch);
     const frac = inch - whole;
@@ -188,19 +229,120 @@
     return `${ft}'${whole}${fracStr}"`;
   }
 
+  function mmToMeters(mm){ return mm / 1000; }
+  function metersToMm(m){ return m * 1000; }
   function isPos(x){ return x != null && isFinite(x) && x > 0; }
 
-  const STANDARD = [0.5, 1, 2, 3];
-  function nearestStandardD(D){
-    let best = STANDARD[0], bestErr = Math.abs(D - best);
-    for (const d of STANDARD){
-      const e = Math.abs(D - d);
-      if (e < bestErr - 1e-12) { best = d; bestErr = e; }
-      if (Math.abs(e - bestErr) <= 1e-12 && d > best) best = d;
-    }
-    return best;
+  // ---------- Lens DB ----------
+  let lensDB = null;
+
+  function setDBStatus(text, ok){
+    const el = $('dbStatus');
+    el.textContent = text;
+    el.classList.remove('ok','bad');
+    el.classList.add(ok ? 'ok' : 'bad');
   }
 
+  async function loadLensDB(){
+    // 1) try network
+    try{
+      const res = await fetch(LENS_DB_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error('bad status');
+      const json = await res.json();
+      lensDB = json;
+      localStorage.setItem(LS_KEY, JSON.stringify(json));
+      setDBStatus('DB: online', true);
+      return;
+    }catch{}
+
+    // 2) fallback localStorage
+    try{
+      const cached = localStorage.getItem(LS_KEY);
+      if (cached){
+        lensDB = JSON.parse(cached);
+        setDBStatus('DB: cached', true);
+        return;
+      }
+    }catch{}
+
+    lensDB = null;
+    setDBStatus('DB: missing', false);
+  }
+
+  function getBrands(){
+    const brands = lensDB?.brands;
+    if (!Array.isArray(brands)) return [];
+    return brands.map(b => b?.name).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+  }
+
+  function getLensLengthMM(brandName, focal){
+    const brands = lensDB?.brands;
+    if (!Array.isArray(brands)) return null;
+    const b = brands.find(x => x?.name === brandName);
+    if (!b?.lenses) return null;
+    const key = String((focal ?? '')).trim();
+    const mm = b.lenses[key];
+    return (typeof mm === 'number' && isFinite(mm) && mm > 0) ? mm : null;
+  }
+
+  function buildBrandDropdown(){
+    const sel = $('brand');
+    sel.innerHTML = '';
+    const brands = getBrands();
+    if (!brands.length){
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No DB';
+      sel.appendChild(opt);
+      return;
+    }
+    for (const name of brands){
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+  }
+
+  // ---------- Auto L from lookup ----------
+  function updateLensDerivedL(){
+    const manual = $('manualL').checked;
+
+    // lock/unlock L
+    $('L').disabled = !manual;
+    $('L').style.opacity = manual ? '1' : '0.65';
+
+    // sensorMm is display/entry for mm; locked unless DB missing
+    $('sensorMm').disabled = true;
+    $('sensorMm').style.opacity = '0.65';
+
+    if (manual) return;
+
+    const brand = $('brand').value;
+    const focal = $('focal').value;
+
+    const mm = getLensLengthMM(brand, focal);
+
+    if (mm != null){
+      $('sensorMm').value = String(mm);
+      const Lm = mmToMeters(mm);
+      $('L').value = metersToFtIn(Lm);
+      return;
+    }
+
+    // If no DB match: allow manual mm entry (still auto-updates L)
+    $('sensorMm').disabled = false;
+    $('sensorMm').style.opacity = '1';
+
+    const typed = Number(($('sensorMm').value || '').trim());
+    if (isFinite(typed) && typed > 0){
+      const Lm = mmToMeters(typed);
+      $('L').value = metersToFtIn(Lm);
+    }
+  }
+
+  // ---------- Diopter math (match-app style: solve any one blank) ----------
+  // D = 1/(X-L) + 1/(S-L)
   function solveD(S, X, L){
     const a = S - L;
     const b = X - L;
@@ -208,6 +350,7 @@
     return (1/a) + (1/b);
   }
 
+  // X = L + 1 / ( D - 1/(S-L) )
   function solveX(S, D, L){
     const a = S - L;
     if (!(a > 0 && D > 0)) return null;
@@ -216,6 +359,7 @@
     return L + (1/denom);
   }
 
+  // S = L + 1 / ( D - 1/(X-L) )
   function solveS(X, D, L){
     const b = X - L;
     if (!(b > 0 && D > 0)) return null;
@@ -224,6 +368,9 @@
     return L + (1/denom);
   }
 
+  // Solve L from S, X, D via quadratic:
+  // Let Δ = X - S, solve for a = S - L:
+  // D a^2 + (DΔ - 2)a - Δ = 0
   function solveL(S, X, D){
     if (!(D > 0)) return null;
     const delta = X - S;
@@ -241,22 +388,33 @@
     const candidates = [a1, a2].filter(a => a > 0 && (delta + a) > 0 && isFinite(a));
     if (!candidates.length) return null;
 
+    // choose candidate yielding sensible L (0 <= L < min(S,X))
     let best = candidates[0];
     for (const a of candidates){
       const L = S - a;
       const Lbest = S - best;
-      const ok = (L >= 0 && L < S);
-      const okBest = (Lbest >= 0 && Lbest < S);
+      const ok = (L >= 0 && L < Math.min(S, X));
+      const okBest = (Lbest >= 0 && Lbest < Math.min(S, X));
       if (ok && !okBest) best = a;
-      if (ok === okBest){
-        if (L >= 0 && Lbest < 0) best = a;
-        if (Math.abs(L) < Math.abs(Lbest)) best = a;
-      }
+      if (ok === okBest && Math.abs(L) < Math.abs(Lbest)) best = a;
     }
     return S - best;
   }
 
+  const STANDARD = [0.5, 1, 2, 3];
+  function nearestStandardD(D){
+    let best = STANDARD[0], bestErr = Math.abs(D - best);
+    for (const d of STANDARD){
+      const e = Math.abs(D - d);
+      if (e < bestErr - 1e-12) { best = d; bestErr = e; }
+      if (Math.abs(e - bestErr) <= 1e-12 && d > best) best = d; // tie: stronger
+    }
+    return best;
+  }
+
   function compute(){
+    updateLensDerivedL();
+
     const S_in = parseDistanceToMeters($('S').value);
     const X_in = parseDistanceToMeters($('X').value);
     const L_in = parseDistanceToMeters($('L').value);
@@ -288,7 +446,7 @@
       if (m === 'D'){
         const Dexact = solveD(S, X, L);
         if (Dexact != null && isFinite(Dexact) && Dexact > 0){
-          solvedLabel = `Solved D from S, X, L`;
+          solvedLabel = 'Solved D from S, X, L';
           exactDText = `+${Dexact.toFixed(3)}`;
           const nd = nearestStandardD(Dexact);
           nearestDText = `+${nd}`;
@@ -300,7 +458,7 @@
       if (m === 'X'){
         const Xsol = solveX(S, D, L);
         if (Xsol != null){
-          solvedLabel = `Solved X from S, D, L`;
+          solvedLabel = 'Solved X from S, D, L';
           $('X').value = metersToFtIn(Xsol);
           X = Xsol;
         }
@@ -309,7 +467,7 @@
       if (m === 'S'){
         const Ssol = solveS(X, D, L);
         if (Ssol != null){
-          solvedLabel = `Solved S from X, D, L`;
+          solvedLabel = 'Solved S from X, D, L';
           $('S').value = metersToFtIn(Ssol);
           S = Ssol;
         }
@@ -318,13 +476,16 @@
       if (m === 'L'){
         const Lsol = solveL(S, X, D);
         if (Lsol != null){
-          solvedLabel = `Solved L from S, X, D`;
+          solvedLabel = 'Solved L from S, X, D';
           $('L').value = metersToFtIn(Lsol);
           L = Lsol;
+          $('manualL').checked = true; // prevent auto-overwrite
+          updateLensDerivedL();
         }
       }
     }
 
+    // far limit needs D and L: Far = L + 1/D
     if (D != null && L != null && D > 0 && L > 0){
       const far = L + (1 / D);
       $('farOut').textContent = metersToFtIn(far);
@@ -337,12 +498,24 @@
     $('nearestDOut').textContent = nearestDText;
   }
 
-  ['S','X','L','D','lens'].forEach(id => {
-    $(id).addEventListener('input', compute);
-    $(id).addEventListener('change', compute);
-  });
+  async function init(){
+    await loadLensDB();
+    buildBrandDropdown();
 
-  compute();
+    // initial UI state
+    $('sensorMm').value = '';
+    $('manualL').checked = false;
+    updateLensDerivedL();
+    compute();
+
+    // listeners
+    ['brand','focal','sensorMm','manualL','S','X','L','D'].forEach(id => {
+      $(id).addEventListener('input', compute);
+      $(id).addEventListener('change', compute);
+    });
+  }
+
+  init();
 })();
 </script>
 </body>
