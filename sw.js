@@ -1,5 +1,5 @@
 // sw.js
-const CACHE = 'diopter-range-v1';
+const CACHE = 'diopter-range-v2';
 const ASSETS = [
   './',
   './index.html',
